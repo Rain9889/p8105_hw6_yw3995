@@ -102,3 +102,81 @@ model_results |>
   geom_errorbar(aes(ymin = OR_CI_lower, ymax = OR_CI_upper)) + 
   theme(axis.text.x = element_text(angle = 90, hjust = 1))
 ```
+
+## Problem 2
+
+### Loading data
+
+```{r, message = FALSE}
+weather_df = 
+  rnoaa::meteo_pull_monitors(
+    c("USW00094728"),
+    var = c("PRCP", "TMIN", "TMAX"), 
+    date_min = "2022-01-01",
+    date_max = "2022-12-31") |>
+  mutate(
+    name = recode(id, USW00094728 = "CentralPark_NY"),
+    tmin = tmin / 10,
+    tmax = tmax / 10) |>
+  select(name, id, everything())
+```
+
+### The distribution of r^2
+
+```{r, message = FALSE}
+r_squared =
+  weather_df |> 
+  modelr::bootstrap(n = 5000) |> 
+  mutate(
+    models = map(strap, ~lm(tmax ~ tmin + prcp, data = .x)),
+    results = map(models, broom::glance)) |> 
+  select(-strap, -models) |> 
+  unnest(results)
+
+r_squared |> 
+  ggplot(aes(x = r.squared)) + geom_density() +
+  labs(title = "Distribution of r^2") +
+  theme_minimal()
+```
+
+* The distribution of r^2 exhibits a left-skewed pattern, characterized by a notable concentration between 0.91 and 0.93, potentially attributable to the impact of outliers. The mean is typically less than the median in a left-skewed distribution, as the skewness is pulling the average towards the left tail. This implies a tendency towards higher r^2 values in the majority of bootstrap samples.
+
+### The distribution of log (β^1 ∗ β^2)
+
+```{r, message = FALSE}
+beta = 
+  weather_df |> 
+  modelr::bootstrap(n = 5000) |> 
+  mutate(
+    models = map(strap, ~lm(tmax ~ tmin + prcp, data = .x)),
+    results = map(models, broom::tidy)) |> 
+  select(-strap, -models) |> 
+  unnest(results) |> 
+  select(.id, term, estimate) |> 
+  pivot_wider(
+    names_from = term, 
+    values_from = estimate) |> 
+  rename(beta1 = tmin, beta2 = prcp) |> 
+  mutate(log_β1_β2 = log(beta1 * beta2))
+
+beta |> 
+  ggplot(aes(x = log_β1_β2)) + geom_density() +
+  labs(title = "Distribution of log (β^1 ∗ β^2)") +
+  theme_minimal()
+```
+
+* The distribution of log (β^1 ∗ β^2) is more left-skewed, displaying significant density between -6 and -5, likely influenced by outliers. The mean is typically less than the median in a left-skewed distribution, as the skewness is pulling the average towards the left tail. This suggests a prevalent occurrence of higher values in most bootstrap samples, although there are comparatively fewer instances of lower values.
+
+### Provide a 95% confidence interval for r^2 and log(β^0∗β^1)
+
+```{r, message = FALSE}
+r_squared |> 
+  summarize(
+    ci_lower = quantile(r.squared, 0.025), 
+    ci_upper = quantile(r.squared, 0.975))
+
+beta |> 
+  summarize(
+    ci_lower = quantile(log_β1_β2, 0.025, na.rm = TRUE), 
+    ci_upper = quantile(log_β1_β2, 0.975, na.rm = TRUE))
+```
