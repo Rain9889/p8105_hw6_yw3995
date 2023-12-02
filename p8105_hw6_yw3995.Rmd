@@ -180,3 +180,93 @@ beta |>
     ci_lower = quantile(log_β1_β2, 0.025, na.rm = TRUE), 
     ci_upper = quantile(log_β1_β2, 0.975, na.rm = TRUE))
 ```
+
+## Problem 3
+
+### Load and clean the data
+
+```{r, message = FALSE}
+birthweight_df = 
+  read_csv("./data/birthweight.csv") |> 
+  mutate(babysex = as.factor(babysex),
+         malform = as.factor(malform),
+         mrace = as.factor(mrace),
+         frace = as.factor(frace)
+         ) |> 
+  janitor::clean_names() |> 
+  select(bwt, everything())
+
+birthweight_df
+```
+
+* I convert numeric to factor to clean the data for regression analysis.
+
+### Check for missing
+
+```{r}
+sum(is.na(birthweight_df))
+```
+
+* There is no missing data.
+
+### Propose a regression model for birthweight
+
+```{r}
+all_model = lm(bwt ~ ., data = birthweight_df)
+summary(all_model)
+```
+
+* After including all variables in the model, I observed several significant values, including *babysex2, bhead, blength, delwt, gaweeks, parity, and smoken*. Since I aim to construct a regression model to predict birthweight, variables such as babysex2, bhead, and blength, which pertain to post-birth characteristics, should be omitted. Consequently, the refined model will encompass **delwt, gaweeks, smoken, and parity** as predictors.
+
+```{r}
+fit_model = lm(bwt ~ delwt + smoken + gaweeks + parity, data = birthweight_df)
+
+birthweight_df |> 
+  modelr::add_predictions(fit_model) |> 
+  add_residuals(fit_model) |> 
+  ggplot(aes(x = pred, y = resid)) +
+  geom_point() +
+  labs(title = "My Regression Model for Birthweight and Predictors") +
+  theme_minimal()
+```
+
+* From this distribution we know **the residuals scatter around 0 with the predictions scatter around 3150**. This is a positive sign, suggesting that the model is capturing the overall trend in the data without a systematic tendency to overpredict or underpredict. However, the consistent offset in the predictions around 3150 suggests a need for further examination. This could be due to various reasons such as a missing predictor, a non-linear relationship, or a model misspecification.
+
+### Compare my model to the others two
+
+```{r}
+model_df = 
+  crossv_mc(birthweight_df, 100) |> 
+  mutate(
+    train = map(train, as_tibble),
+    test = map(test, as_tibble))
+
+model_df =
+  model_df |> 
+  mutate(
+    model_1  = map(train, ~lm(bwt ~ babysex + fincome + smoken, data = .x)),
+    model_2  = map(train, ~lm(bwt ~ gaweeks + blength, data = .x)),
+    model_3  = map(train, ~lm(bwt ~ bhead * blength * babysex, data = .x))) |> 
+  mutate(
+    rmse_1 = map2_dbl(model_1, test, \(mod, df) rmse(model = mod, data = df)),
+    rmse_2 = map2_dbl(model_2, test, \(mod, df) rmse(model = mod, data = df)),
+    rmse_3 = map2_dbl(model_3, test, \(mod, df) rmse(model = mod, data = df)))
+```
+
+### A plot
+
+```{r}
+model_df |> 
+  select(starts_with("rmse")) |> 
+  pivot_longer(
+    everything(),
+    names_to = "model", 
+    values_to = "rmse",
+    names_prefix = "rmse_") |> 
+  mutate(model = fct_inorder(model)) |> 
+  ggplot(aes(x = model, y = rmse)) + geom_violin() +
+  labs(title = "Comparing Three Predictivity Models") +
+  theme_minimal()
+```
+
+* Upon comparing the prediction error distributions among three methods, it was observed that Model 3 exhibits the lowest mean Root Mean Square Error (RMSE), indicating superior predictive performance. In contrast, Model 1 (my model) demonstrates the highest RMSE. This discrepancy suggests that **Model 3 is a well-fitted model with strong predictivity**. Notably, Model 3 incorporates predictors such as head circumference, length, sex, and all interactions, including the three-way interaction between these variables.
